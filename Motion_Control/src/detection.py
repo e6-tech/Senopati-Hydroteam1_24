@@ -3,212 +3,142 @@ from ultralytics import YOLO
 import time
 import math
 
-# Konstanta
-MODEL_PATH = '../../models/best.pt'
-VIDEO_PATH = "../../B.mp4"
-FRAME_WIDTH, FRAME_HEIGHT = 640, 640
 
-# Dictionary untuk mapping class ID ke nama
-class_names = {0: 'green_ball', 1: 'red_ball'}
+class BallDetector:
+    def __init__(self, model_path, video_path,  max_lr, frame_width=640, frame_height=640):
+        self.model = YOLO(model_path)
+        self.video_path = video_path
+        self.frame_width = frame_width
+        self.frame_height = frame_height
+        self.center_x_frame = frame_width // 2
+        self.left_x_frame = max_lr
+        self.right_x_frame = frame_width-max_lr
+        self.pivot_point = (frame_width // 2, frame_height)
+        self.bottom_pivot = 340
+        self.class_names = {0: 'green_ball', 1: 'red_ball'}
+        # Hijau untuk green_ball, merah untuk red_ball
+        self.class_colors = [(0, 255, 0), (0, 0, 255)]
 
-# List untuk menyimpan warna berdasarkan class ID
-class_colors = [
-    (0, 255, 0),  # Hijau untuk green_ball (ID 0)
-    (0, 0, 255)   # Merah untuk red_ball (ID 1)
-]
+    def draw_center_line(self, frame, fps, green, red, mid):
+        """Menggambar garis tengah pada frame video."""
+        cv2.putText(frame, f'FPS: {fps:.2f}', (10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2)
 
-# Hitung titik tengah frame
-center_x_frame = FRAME_WIDTH // 2
-left_x_frame = 100
-right_x_frame = 540
+        if green is not None:
+            green_center_x, green_center_y = green[4]
+            cv2.putText(frame, f'Green: ({green_center_x:.0f}, {green_center_y:.0f})', (10, 60),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
 
-# Titik acuan pivot
-pivot_point = (FRAME_WIDTH // 2, FRAME_HEIGHT)
-bottom_pivot = 340
-fps = 0.00
+        if red is not None:
+            red_center_x, red_center_y = red[4]
+            cv2.putText(frame, f'Red: ({red_center_x:.0f}, {red_center_y:.0f})', (10, 80),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
 
+        cv2.putText(frame, f'Mid: ({mid[0]:.0f}, {mid[1]:.0f})', (10, 100),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
 
-def draw_center_line(frame, fps, green, red, mid):
-    """
-    Fungsi untuk menggambar garis tengah berwarna putih pada frame.
-    """
-    # Tampilkan FPS di frame
-    cv2.putText(frame, f'FPS: {fps:.2f}', (10, 30),
-                cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2)
+        cv2.line(frame, (self.center_x_frame, 0),
+                 (self.center_x_frame, self.frame_height), (255, 255, 255), 2)
+        cv2.line(frame, (self.left_x_frame, 0),
+                 (self.left_x_frame, self.frame_height), (255, 255, 255), 2)
+        cv2.line(frame, (self.right_x_frame, 0),
+                 (self.right_x_frame, self.frame_height), (255, 255, 255), 2)
+        cv2.line(frame, (0, self.bottom_pivot),
+                 (self.frame_width, self.bottom_pivot), (255, 255, 255), 2)
 
-    if green is not None:
-        green_center_x, green_center_y = green[4]
-        cv2.putText(frame, f'Green: ({green_center_x:.0f}, {green_center_y:.0f})', (10, 60),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+    def calculate_distance(self, point1, point2):
+        """Menghitung jarak Euclidean antara dua titik."""
+        return math.sqrt((point1[0] - point2[0]) ** 2 + (point1[1] - point2[1]) ** 2)
 
-    if red is not None:
-        red_center_x, red_center_y = red[4]
-        cv2.putText(frame, f'Red: ({red_center_x:.0f}, {red_center_y:.0f})', (10, 80),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+    def calculate_mid_point(self, point1, point2):
+        """Menghitung titik tengah antara dua titik."""
+        return ((point1[0] + point2[0]) / 2, (point1[1] + point2[1]) / 2)
 
-    cv2.putText(frame, f'Mid: ({mid[0]:.0f}, {mid[1]:.0f})', (10, 100),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
+    def detect(self, set_device='0', confident=0.6, iou_thres=0.7):
+        global mid_point
+        mid_point = 320, 320
+        """Fungsi utama untuk menjalankan deteksi."""
+        cap = cv2.VideoCapture(self.video_path)
+        if not cap.isOpened():
+            print("Error: Could not open video.")
+            return
 
-    # Garis vertikal di tengah frame
-    cv2.line(frame, (center_x_frame, 0),
-             (center_x_frame, FRAME_HEIGHT), (255, 255, 255), 2)
+        while cap.isOpened():
+            ret, frame = cap.read()
+            if not ret:
+                break
 
-    # Garis vertikal di kiri frame
-    cv2.line(frame, (left_x_frame, 0),
-             (left_x_frame, FRAME_HEIGHT), (255, 255, 255), 2)
+            resized_frame = cv2.resize(
+                frame, (self.frame_width, self.frame_height))
 
-    # Garis vertikal di kanan frame
-    cv2.line(frame, (right_x_frame, 0),
-             (right_x_frame, FRAME_HEIGHT), (255, 255, 255), 2)
+            start_time = time.time()
+            results = self.model.predict(
+                source=resized_frame, imgsz=640, conf=confident, iou=iou_thres, max_det=8, device=set_device)
+            end_time = time.time()
 
-    # Garis horizontal di bawah frame
-    cv2.line(frame, (0, bottom_pivot),
-             (FRAME_WIDTH, bottom_pivot), (255, 255, 255), 2)
+            fps = 1 / (end_time - start_time)
+            closest_green_ball = None
+            closest_red_ball = None
+            closest_green_distance = float('inf')
+            closest_red_distance = float('inf')
 
+            for result in results:
+                for box in result.boxes:
+                    x1, y1, x2, y2 = box.xyxy[0].tolist()
+                    conf = box.conf[0].item()
+                    cls = int(box.cls[0].item())
 
-def calculate_distance(point1, point2):
-    """
-    Fungsi untuk menghitung jarak Euclidean antara dua titik.
-    """
-    return math.sqrt((point1[0] - point2[0]) ** 2 + (point1[1] - point2[1]) ** 2)
+                    center_box = ((x1 + x2) / 2, (y1 + y2) / 2)
+                    color = self.class_colors[cls] if cls < len(
+                        self.class_colors) else (255, 255, 255)
+                    detected_class_name = self.class_names.get(cls, 'Unknown')
 
+                    distance_to_pivot = self.calculate_distance(
+                        center_box, self.pivot_point)
 
-def calculate_mid_point(point1, point2):
-    """
-    Fungsi untuk menghitung titik tengah antara dua titik.
-    """
-    return ((point1[0] + point2[0]) / 2, (point1[1] + point2[1]) / 2)
+                    if center_box[1] < self.bottom_pivot:
+                        if cls == 0 and distance_to_pivot < closest_green_distance:
+                            closest_green_distance = distance_to_pivot
+                            closest_green_ball = (
+                                x1, y1, x2, y2, center_box, color)
+                        if cls == 1 and distance_to_pivot < closest_red_distance:
+                            closest_red_distance = distance_to_pivot
+                            closest_red_ball = (
+                                x1, y1, x2, y2, center_box, color)
 
+                    cv2.rectangle(resized_frame, (int(x1), int(y1)),
+                                  (int(x2), int(y2)), color, 2)
+                    label = f'{detected_class_name} {conf:.2f}'
+                    cv2.putText(resized_frame, label, (int(x1), int(
+                        y1) - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
 
-def main():
-    # Titik tengah awal
-    mid_point = 320, 320
+            if closest_green_ball and closest_red_ball:
+                green_center = closest_green_ball[4]
+                red_center = closest_red_ball[4]
 
-    # Load YOLOv8 model
-    model = YOLO(MODEL_PATH)
+                cv2.circle(resized_frame, (int(green_center[0]), int(
+                    green_center[1])), 5, (0, 255, 0), -1)
+                cv2.circle(resized_frame, (int(red_center[0]), int(
+                    red_center[1])), 5, (0, 0, 255), -1)
 
-    # Open the video file
-    cap = cv2.VideoCapture(VIDEO_PATH)
-    if not cap.isOpened():
-        print("Error: Could not open video.")
-        return
+                mid_point = self.calculate_mid_point(green_center, red_center)
+                cv2.line(resized_frame, (int(green_center[0]), int(green_center[1])),
+                         (int(red_center[0]), int(red_center[1])), (0, 255, 255), 2)
+                cv2.line(resized_frame, (int(mid_point[0]), int(
+                    mid_point[1])), self.pivot_point, (0, 255, 255), 2)
+                cv2.circle(resized_frame, (int(mid_point[0]), int(
+                    mid_point[1])), 5, (255, 0, 0), -1)
+                return mid_point
 
-    while cap.isOpened():
-        ret, frame = cap.read()  # Ambil frame dari video
-        if not ret:
-            break
+            self.draw_center_line(resized_frame, fps, closest_green_ball,
+                                  closest_red_ball, (self.frame_width // 2, 320))
+            cv2.imshow('ASV-KKI 2024', resized_frame)
 
-        # Resize frame to 640x640
-        resized_frame = cv2.resize(frame, (FRAME_WIDTH, FRAME_HEIGHT))
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                break
 
-        # Catat waktu sebelum deteksi
-        start_time = time.time()
+        cap.release()
+        cv2.destroyAllWindows()
 
-        # Menggunakan model.predict() dengan source dari resized_frame dan imgsz 640
-        results = model.predict(source=resized_frame,
-                                imgsz=640, conf=0.6, iou=0.7, max_det=8, device='cpu')
-
-        # Catat waktu setelah deteksi
-        end_time = time.time()
-
-        # Hitung waktu yang berlalu per frame dan FPS
-        elapsed_time = end_time - start_time
-        fps = 1 / elapsed_time
-
-        # Variabel untuk menyimpan objek terdekat per kelas
-        closest_green_ball = None
-        closest_red_ball = None
-        closest_green_distance = float('inf')
-        closest_red_distance = float('inf')
-
-        # Ekstraksi manual dari bounding box, confidence scores, dan class labels
-        for result in results:
-            for box in result.boxes:
-                # Extract bounding box coordinates
-                x1, y1, x2, y2 = box.xyxy[0].tolist()
-                conf = box.conf[0].item()
-                cls = int(box.cls[0].item())
-
-                # Hitung titik tengah dari bounding box
-                center_x_box = (x1 + x2) / 2
-                center_y_box = (y1 + y2) / 2
-                center_box = (center_x_box, center_y_box)
-
-                # Tentukan warna berdasarkan class ID menggunakan class_colors
-                color = class_colors[cls] if cls < len(
-                    class_colors) else (255, 255, 255)
-
-                # Print detected object details
-                detected_class_name = class_names.get(cls, 'Unknown')
-                # print(
-                #     f"Detected object: {detected_class_name}, Confidence: {conf:.2f}, Box: [{x1}, {y1}, {x2}, {y2}]")
-
-                # Hitung jarak ke pivot point
-                distance_to_pivot = calculate_distance(center_box, pivot_point)
-
-                # Filter berdasarkan posisi Y (harus di atas bottom_pivot)
-                if center_y_box < bottom_pivot:
-                    # Jika class 'green_ball', periksa jarak dan simpan yang terdekat
-                    if cls == 0 and distance_to_pivot < closest_green_distance:
-                        closest_green_distance = distance_to_pivot
-                        closest_green_ball = (
-                            x1, y1, x2, y2, center_box, color)
-
-                    # Jika class 'red_ball', periksa jarak dan simpan yang terdekat
-                    if cls == 1 and distance_to_pivot < closest_red_distance:
-                        closest_red_distance = distance_to_pivot
-                        closest_red_ball = (x1, y1, x2, y2, center_box, color)
-
-                # Gambarkan kotak deteksi dan teks dengan warna yang sesuai
-                cv2.rectangle(resized_frame, (int(x1), int(y1)),
-                              (int(x2), int(y2)), color, 2)
-                label = f'{detected_class_name} {conf:.2f}'
-                cv2.putText(resized_frame, label, (int(x1), int(y1) - 10),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
-
-        # Jika ada green_ball dan red_ball terdekat
-        if closest_green_ball is not None and closest_red_ball is not None:
-            # Dapatkan titik tengah dari kedua bola
-            _, _, _, _, green_center, _ = closest_green_ball
-            _, _, _, _, red_center, _ = closest_red_ball
-
-            # Gambarkan titik hijau dan merah
-            cv2.circle(resized_frame, (int(green_center[0]), int(
-                green_center[1])), 5, (0, 255, 0), -1)
-            cv2.circle(resized_frame, (int(red_center[0]), int(
-                red_center[1])), 5, (0, 0, 255), -1)
-
-            # Hitung titik tengah di antara kedua bola
-            mid_point = calculate_mid_point(green_center, red_center)
-            print(f"Posisi X : {mid_point[0]:.0f}")
-
-            # Gambar garis yang menghubungkan titik tengah green_ball dan red_ball
-            cv2.line(resized_frame, (int(green_center[0]), int(green_center[1])),
-                     (int(red_center[0]), int(red_center[1])), (0, 255, 255), 2)
-
-            # Gambar garis dari titik tengah dua bola ke pivot_point
-            cv2.line(resized_frame, (int(mid_point[0]), int(mid_point[1])),
-                     pivot_point, (0, 255, 255), 2)
-
-            # Gambarkan titik biru di tengah-tengah antara green_ball dan red_ball
-            cv2.circle(resized_frame, (int(mid_point[0]), int(
-                mid_point[1])), 5, (255, 0, 0), -1)
-
-        # Gambar garis tengah pada frame
-        draw_center_line(resized_frame, fps, closest_green_ball,
-                         closest_red_ball, mid_point)
-
-        # Tampilkan frame dengan deteksi
-        cv2.imshow('ASV-KKI 2024', resized_frame)
-
-        # Exit the loop if 'q' is pressed
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            break
-
-    # Release resources
-    cap.release()
-    cv2.destroyAllWindows()
-
-
-if __name__ == "__main__":
-    main()
+    def navigation_data(self):
+        return mid_point[0]

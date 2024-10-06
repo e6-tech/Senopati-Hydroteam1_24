@@ -4,8 +4,8 @@ import time
 import math
 
 # Konstanta
-MODEL_PATH = '../models/best.engine'
-#VIDEO_PATH = 0
+MODEL_PATH = '../models/best.pt'
+# VIDEO_PATH = 0
 VIDEO_PATH = "../B.mp4"
 FRAME_WIDTH, FRAME_HEIGHT = 640, 640
 
@@ -108,7 +108,7 @@ def main():
 
         # Menggunakan model.predict() dengan source dari resized_frame dan imgsz 640
         results = model.predict(source=resized_frame,
-                                imgsz=640, conf=0.6, iou=0.7, max_det=8, device='0')
+                                imgsz=640, conf=0.6, iou=0.7, max_det=8, device='cpu')
 
         # Catat waktu setelah deteksi
         end_time = time.time()
