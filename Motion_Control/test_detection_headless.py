@@ -6,7 +6,7 @@ import math
 # Konstanta
 MODEL_PATH = '../models/best.engine'
 #VIDEO_PATH = 0
-VIDEO_PATH = "../B.mp4"
+#VIDEO_PATH = "../B.mp4"
 FRAME_WIDTH, FRAME_HEIGHT = 640, 640
 
 # Dictionary untuk mapping class ID ke nama
